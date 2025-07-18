@@ -1,7 +1,8 @@
-use crate::funasr::{devices, hosts, Language};
-use crate::global::{CONFIG, SENSE_VOICE};
+use crate::funasr::{devices, hosts, Language, Recorder};
+use crate::global::{get_device_by_name, CONFIG, RECORDER, SENSE_VOICE};
 use cpal::{traits::DeviceTrait, Device};
-use log::{debug,info};
+use log::{debug, info};
+use std::sync::{Arc, Mutex};
 use tauri::tray::MouseButton::Left;
 use tauri::tray::TrayIconEvent;
 use tauri::{
@@ -67,7 +68,7 @@ pub(crate) fn setup_tray_icon(app: &App) {
 }
 
 /// 获取所有的输入设备
-fn all_input_devices() -> Vec<Device> {
+pub fn all_input_devices() -> Vec<Device> {
     let mut input_devices: Vec<Device> = Vec::new();
     for host in hosts() {
         if let Ok(host_devices) = devices(host) {
@@ -77,18 +78,6 @@ fn all_input_devices() -> Vec<Device> {
         }
     }
     input_devices
-}
-/// 根据设备名称获取指定输入设备
-pub fn get_device_by_name(target_device_name: String) -> Option<Device> {
-    let input_devices = all_input_devices();
-    for device in input_devices {
-        if let Ok(device_name) = device.name() {
-            if device_name == target_device_name {
-                return Some(device);
-            }
-        }
-    }
-    None
 }
 
 /// 创建一个输入设备菜单项
@@ -136,8 +125,15 @@ fn exit(app: &AppHandle) {
 }
 /// 修改选中的设备名称
 fn change_select_device_name(device_name: String, device_menu: &Submenu<Wry>) {
+    // 修改配置
     let mut config = CONFIG.lock().unwrap();
-    config.select_device_name = Some(device_name);
+    config.select_device_name = Some(device_name.clone());
+    // 修改 RECORDER
+    let mut recorder = RECORDER.lock().unwrap();
+    let device = get_device_by_name(device_name).unwrap();
+    let recorder_ins = Recorder::new(device);
+    *recorder = recorder_ins;
+    
     if let Some(select_device_name) = config.select_device_name.clone() {
         for item in device_menu.items().unwrap() {
             if let Some(check_item) = item.as_check_menuitem() {

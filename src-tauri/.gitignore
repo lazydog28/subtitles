@@ -5,4 +5,4 @@
 *.schema.json
 test.*
 .idea
-models
+/models

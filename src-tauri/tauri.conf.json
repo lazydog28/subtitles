@@ -1,0 +1,48 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "极简字幕",
+  "version": "0.1.0",
+  "identifier": "site.lazydog.subtitles",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm generate"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "实时字幕",
+        "width": 1200,
+        "height": 200,
+        "center": true,
+        "resizable": true,
+        "fullscreen": false,
+        "alwaysOnTop":true,
+        "transparent": true,
+        "decorations": false,
+        "dragDropEnabled": false,
+        "skipTaskbar": true,
+        "windowEffects": {
+          "effects": ["blur"]
+        }
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi"],
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
+    }
+  }
+}

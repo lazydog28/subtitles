@@ -23,7 +23,7 @@ pub const HIGH_FREQ: f32 = 8000.0;
 /// 预加重系数，用于平衡高频和低频能量
 pub const PREEMPH_COEFF: f32 = 0.97f32;
 /// 噪声增益 0.00003f32
-pub const NOISE_GAIN: f32 = 0.00003f32;
+// pub const NOISE_GAIN: f32 = 0.00003f32;
 /// 将 FRAME_LENGTH 向上舍入到最近的2的幂次方
 pub const PADDED_SIZE: usize = round_up_to_nearest_power_of_two(FRAME_LENGTH);
 /// 创建梅尔滤波器组系数矩阵

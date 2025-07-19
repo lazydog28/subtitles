@@ -9,6 +9,6 @@ mod token;
 pub use e2e_vad::{E2EVadModel, PointType, Segment};
 pub use fbank::{fbank, Frame};
 pub use frontend::{WavFrontend, CMVN};
-pub use recorder::{default_device, devices, hosts, Recorder,microphone_stream};
+pub use recorder::{default_device, devices, hosts, Recorder};
 pub use session::OrtInferSession;
 pub use token::{read_token, TokenIdConverter};

@@ -89,7 +89,6 @@ impl SenseVoice {
         let feats = feats.insert_axis(Axis(0));
         let language = self.language.clone() as i32;
         let logits = {
-            // 当前时间
             let mut result = self.session.run(inputs![
               "speech"=>Tensor::from_array(feats)?,
               "speech_lengths"=>Tensor::from_array(([1], vec![x_length as i32]))?,

@@ -2,7 +2,6 @@ use crate::funasr::{devices, hosts, Language, Recorder};
 use crate::global::{get_device_by_name, CONFIG, RECORDER, SENSE_VOICE};
 use cpal::{traits::DeviceTrait, Device};
 use log::{debug, info};
-use std::sync::{Arc, Mutex};
 use tauri::tray::MouseButton::Left;
 use tauri::tray::TrayIconEvent;
 use tauri::{
@@ -121,7 +120,7 @@ fn exit(app: &AppHandle) {
     for (_, window) in app.webview_windows() {
         window.close().unwrap()
     }
-    app.exit(0)
+
 }
 /// 修改选中的设备名称
 fn change_select_device_name(device_name: String, device_menu: &Submenu<Wry>) {

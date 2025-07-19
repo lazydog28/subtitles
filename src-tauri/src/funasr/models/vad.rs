@@ -57,7 +57,7 @@ impl Vad {
         }
         let mut result = self.session.run(inputs)?;
         let scores = Self::extract_scores(&result[0])?;
-        let mut new_caches: Vec<ort::value::Value> = Vec::new();
+        let mut new_caches: Vec<Value> = Vec::new();
         for i in 0..FSMN_LAYERS {
             new_caches.push(
                 result
@@ -70,7 +70,7 @@ impl Vad {
     }
 
     /// 提取得分数据
-    fn extract_scores(scores_tensor: &ort::value::Value) -> Result<Array2<f32>> {
+    fn extract_scores(scores_tensor: &Value) -> Result<Array2<f32>> {
         let scores_array = scores_tensor.try_extract_array()?;
         let shape = scores_array.shape();
         let dim = shape[1];

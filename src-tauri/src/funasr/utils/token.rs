@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -7,43 +6,21 @@ use std::path::Path;
 pub struct TokenIdConverter {
     token_list: Vec<String>,
     unk_symbol: String,
-    token2id: HashMap<String, usize>,
-    unk_id: usize,
 }
 
 impl TokenIdConverter {
     pub fn new(token_list: Vec<String>) -> Self {
         let unk_symbol = token_list.last().unwrap().clone();
-        let token2id: HashMap<String, usize> = token_list
-            .iter()
-            .enumerate()
-            .map(|(i, v)| (v.clone(), i))
-            .collect();
-        let unk_id = token2id[&unk_symbol];
-
         Self {
             token_list,
             unk_symbol,
-            token2id,
-            unk_id,
         }
-    }
-
-    pub fn get_num_vocabulary_size(&self) -> usize {
-        self.token_list.len()
     }
 
     pub fn ids2tokens(&self, integers: &[usize]) -> Vec<String> {
         integers
             .iter()
             .map(|&i| self.token_list.get(i).unwrap_or(&self.unk_symbol).clone())
-            .collect()
-    }
-
-    pub fn tokens2ids(&self, tokens: &[String]) -> Vec<usize> {
-        tokens
-            .iter()
-            .map(|token| self.token2id.get(token).copied().unwrap_or(self.unk_id))
             .collect()
     }
 }

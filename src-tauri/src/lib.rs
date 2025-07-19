@@ -12,7 +12,7 @@ use tray_icon::setup_tray_icon;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     utils::init_log();
-    tauri::Builder::default()
+    let app=tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             models_exists,
@@ -26,6 +26,15 @@ pub fn run() {
             info!("启动成功");
             Ok(())
         })
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())
         .expect("error while running tauri application");
+    app.run(|_app_handle, event| match event {
+        tauri::RunEvent::ExitRequested {  .. } => {
+            info!("应用退出中...");
+        }
+        tauri::RunEvent::Exit => {
+            info!("应用程序已退出");
+        }
+        _ => {}
+    });
 }

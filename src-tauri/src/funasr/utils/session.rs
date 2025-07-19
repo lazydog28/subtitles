@@ -29,14 +29,12 @@ impl OrtInferSession {
         let session = Session::builder()?
             .with_intra_threads(INTRA_THREADS)?
             .with_optimization_level(GraphOptimizationLevel::Level3)?
-            .with_memory_pattern(false)?
             .with_log_level(LogLevel::Fatal)?
             .with_memory_pattern(false)?
             .with_execution_providers([
                 DirectMLExecutionProvider::default()
                     .build()
                     .error_on_failure(), // 如果DirectML不可用，则使用CPU执行提供程序
-                // WebGPUExecutionProvider::default().build().error_on_failure(), // 如果DirectML不可用，则使用CPU执行提供程序
                 CPUExecutionProvider::default().build().error_on_failure(), // 如果DirectML不可用，则使用CPU执行提供程序
             ])?
             .commit_from_file(model_file.clone())?;
@@ -50,13 +48,7 @@ impl OrtInferSession {
     ) -> OrtResult<SessionOutputs<'s>> {
         self.session.run(input_values)
     }
-    pub fn get_input_names(&self) -> Vec<&str> {
-        self.session
-            .inputs
-            .iter()
-            .map(|input| input.name.as_str())
-            .collect()
-    }
+
 
     fn verify_model(model_path: &PathBuf) -> Result<()> {
         if !model_path.exists() {

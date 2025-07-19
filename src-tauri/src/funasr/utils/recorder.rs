@@ -1,51 +1,16 @@
-use anyhow::Error;
+use crate::funasr::utils::constant::SAMPLE_RATE;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Devices, DevicesError, HostId, InputDevices, SampleFormat};
 use num_traits::{Bounded, FromPrimitive, NumCast};
 use std::any::TypeId;
-use std::fs::File;
-use std::io::{BufWriter, Write};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::time::Duration;
-use crate::funasr::utils::constant::SAMPLE_RATE;
 
-const TARGET_CHUNK_SIZE:usize=1600;
-
-/// 获取麦克风实时音频数据流
-///
-/// # 参数
-/// - `recorder`: 录音器实例
-///
-/// # 返回值
-/// 音频数据流迭代器
-pub fn microphone_stream(
-    recorder: Arc<Mutex<Recorder>>,
-) -> impl Iterator<Item = Vec<f32>> {
-    std::iter::from_fn(move || {
-        // 等待足够的音频数据
-        loop {
-            let sample_count = {
-                let recorder = recorder.lock().expect("获取录音器锁失败");
-                recorder.sample_count()
-            };
-
-            if sample_count >= TARGET_CHUNK_SIZE {
-                break;
-            }
-            thread::sleep(Duration::from_millis(100)); // 等待10ms
-        }
-        // 获取音频数据
-        let mut recorder = recorder.lock().expect("获取录音器锁失败");
-        Some(recorder.pop_head_sample(TARGET_CHUNK_SIZE).unwrap())
-    })
-}
+const MAX_QUEUE_SIZE: usize = 16000 * 300; // 约5分钟的16kHz音频
 
 /// 获取可用的音频主机列表
 ///
 /// # 返回值
 /// 返回一个包含所有可用 HostId 的向量
-#[allow(dead_code)]
 pub fn hosts() -> Vec<HostId> {
     cpal::available_hosts()
 }
@@ -57,7 +22,6 @@ pub fn hosts() -> Vec<HostId> {
 ///
 /// # 返回值
 /// 返回包含输入设备的 Result，如果获取失败则返回 DevicesError 错误
-#[allow(dead_code)]
 pub fn devices(host: HostId) -> Result<InputDevices<Devices>, DevicesError> {
     let host = cpal::host_from_id(host).expect("获取主机失败");
     host.input_devices()
@@ -73,72 +37,20 @@ pub fn default_device() -> Option<Device> {
 
 pub struct Recorder {
     pub samples_queue: Arc<Mutex<Vec<f32>>>, // 音频采样队列
+    #[allow(dead_code)] // 保证音频流存活，不然不会读取设备输入
     stream: cpal::Stream,                    // 音频流
-    max_samples: usize,                      // 最大采样数限制
 }
 
-/// 采用线性插值的方式进行重采样
-pub fn resample(data: Vec<f32>, source_sample_rate: u32, target_sample_rate: u32) -> Vec<f32> {
-    // 如果源采样率等于目标采样率或者数据为空，则直接返回原始数据
-    if source_sample_rate == target_sample_rate || data.is_empty() {
-        return data; // 采样率相同，无需重采样
-    }
-
-    let source_len = data.len();
-    let ratio = source_sample_rate as f64 / target_sample_rate as f64;
-    let target_len = ((source_len as f64) / ratio).ceil() as usize;
-
-    // 预分配内存，避免动态扩容
-    let mut resampled = Vec::with_capacity(target_len);
-
-    // 如果是整数倍下采样，使用更简单的算法
-    if ratio.fract() == 0.0 && ratio >= 1.0 {
-        let step = ratio as usize;
-        data.iter().step_by(step).for_each(|&x| resampled.push(x));
-        return resampled;
-    }
-
-    for i in 0..target_len {
-        // 计算目标点在原始数据中的对应位置（浮点数）
-        let source_index_float =
-            (i as f64) * (source_sample_rate as f64) / (target_sample_rate as f64);
-
-        // 获取左右两个最近的原始数据索引
-        let left_index = source_index_float.floor() as usize;
-        let right_index = source_index_float.ceil() as usize;
-
-        // 如果左索引超出了原始数据范围，直接使用最后一个点的值 (这种情况通常发生在最后一个点或接近最后一个点时)
-        if left_index >= source_len - 1 {
-            resampled[i] = data[source_len - 1];
-            continue;
-        }
-
-        // 获取左右两个点的值
-        let left_value = data[left_index];
-        let right_value = data[right_index];
-
-        // 计算插值系数
-        let alpha = (source_index_float - (left_index as f64)) as f32;
-
-        // 线性插值
-        let interpolated_value = left_value * (1.0 - alpha) + right_value * alpha;
-        resampled[i] = interpolated_value;
-    }
-
-    resampled
-}
 
 impl Recorder {
     /// 创建一个新的Recorder实例，使用指定采样率
-    pub fn new(device: Device, ) -> Self {
-        Self::new_with_max_duration(device, SAMPLE_RATE as u32, 300) // 默认最大5分钟
+    pub fn new(device: Device) -> Self {
+        Self::new_with_max_duration(device, SAMPLE_RATE as u32) // 默认最大5分钟
     }
-
     /// 创建一个新的Recorder实例，指定最大录制时长
     pub fn new_with_max_duration(
         device: Device,
         sample_rate: u32,
-        max_duration_seconds: u32,
     ) -> Self {
         // 注意不要删除，宏里面要使用的
         #[allow(unused)]
@@ -153,8 +65,8 @@ impl Recorder {
         #[allow(unused)]
         let source_sample_rate = config.sample_rate().0;
         let samples_queue = Arc::new(Mutex::new(Vec::new()));
+        #[allow(unused)]
         let target_sample_rate = sample_rate;
-        let max_samples = (target_sample_rate * max_duration_seconds) as usize;
 
         // 宏来减少重复代码
         macro_rules! build_stream {
@@ -183,7 +95,7 @@ impl Recorder {
             };
         }
 
-        let stream = match config.sample_format() {
+        let stream:cpal::Stream = match config.sample_format() {
             SampleFormat::I8 => build_stream!(i8),
             SampleFormat::I16 => build_stream!(i16),
             SampleFormat::I32 | SampleFormat::I24 => build_stream!(i32),
@@ -201,74 +113,7 @@ impl Recorder {
         Self {
             samples_queue,
             stream,
-            max_samples,
         }
-    }
-
-    pub fn stop(&mut self) -> Result<(), Error> {
-        // 停止录制
-        self.stream
-            .pause()
-            .map_err(|e| Error::msg(format!("停止录制失败: {}", e)))?;
-        Ok(())
-    }
-
-    /// 获取当前录制的样本数量
-    #[allow(dead_code)]
-    pub fn sample_count(&self) -> usize {
-        self.samples_queue.lock().expect("获取锁失败").len()
-    }
-
-    /// 获取录制数据的副本
-    #[allow(dead_code)]
-    pub fn get_samples(&self) -> Vec<f32> {
-        self.samples_queue.lock().expect("获取锁失败").clone()
-    }
-
-    /// 获取录制数据的副本（指定范围）
-    #[allow(dead_code)]
-    pub fn get_samples_range(&self, start: usize, end: Option<usize>) -> Result<Vec<f32>, Error> {
-        let queue = self.samples_queue.lock().expect("获取锁失败");
-        let end = end.unwrap_or(queue.len()).min(queue.len());
-        if start >= queue.len() || start >= end {
-            return Err(Error::msg("参数错误"));
-        }
-        Ok(queue[start..end].to_vec())
-    }
-
-    /// 清空录制缓冲区
-    #[allow(dead_code)]
-    pub fn clear_samples(&mut self) {
-        self.samples_queue.lock().expect("锁异常").clear();
-    }
-
-    /// 检查是否达到最大录制时长
-    #[allow(dead_code)]
-    pub fn is_max_duration_reached(&self) -> bool {
-        let current_samples = self.sample_count();
-        current_samples >= self.max_samples
-    }
-
-    /// 弹出当前录制的样本数据
-    #[allow(dead_code)]
-    pub fn pop_samples(&mut self) -> Vec<f32> {
-        let mut queue = self.samples_queue.lock().expect("获取锁失败");
-        std::mem::replace(&mut *queue, Vec::new())
-    }
-
-    /// 获取当前采样率
-    #[allow(dead_code)]
-    pub fn target_sample_rate(&self) -> u32 {
-        // 从 max_samples 反推采样率（假设默认5分钟）
-        (self.max_samples / 300) as u32
-    }
-
-    /// 获取录制时长（秒）
-    #[allow(dead_code)]
-    pub fn recording_duration(&self) -> f32 {
-        let sample_count = self.sample_count();
-        let target_rate = self.target_sample_rate();
-        sample_count as f32 / target_rate as f32
     }
 
     pub fn pop_head_sample(&mut self, chunk_size: usize) -> Option<Vec<f32>> {
@@ -316,7 +161,6 @@ fn process_samples<T: NumCast + Bounded + FromPrimitive + Copy + 'static>(
         let mut queue = samples_queue.lock().expect("获取锁失败");
 
         // 简单的内存保护：如果队列太大，移除旧的样本
-        const MAX_QUEUE_SIZE: usize = 16000 * 300; // 约5分钟的16kHz音频
         let new_total = queue.len() + resample_data.len();
 
         if new_total > MAX_QUEUE_SIZE {
@@ -373,130 +217,53 @@ fn normalization<T: NumCast + Bounded + Copy + 'static>(data: &[T]) -> Vec<f32> 
             .collect::<Vec<f32>>()
     }
 }
+/// 采用线性插值的方式进行重采样
+pub fn resample(data: Vec<f32>, source_sample_rate: u32, target_sample_rate: u32) -> Vec<f32> {
+    // 如果源采样率等于目标采样率或者数据为空，则直接返回原始数据
+    if source_sample_rate == target_sample_rate || data.is_empty() {
+        return data; // 采样率相同，无需重采样
+    }
 
-/// 将 f32 音频数据转换为 PCM 格式（i16）并保存到文件
-///
-/// # 参数
-/// - `samples`: f32 格式的音频数据，范围应该在 [-1.0, 1.0]
-/// - `filename`: 输出文件名
-/// - `sample_rate`: 采样率
-///
-/// # 返回值
-/// 成功时返回 Ok(())，失败时返回错误信息
-#[allow(dead_code)]
-pub fn to_pcm(
-    samples: &[f32],
-    filename: &str,
-    sample_rate: u32,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(filename)?;
-    let mut writer = BufWriter::with_capacity(64 * 1024, file); // 64KB 缓冲区
+    let source_len = data.len();
+    let ratio = source_sample_rate as f64 / target_sample_rate as f64;
+    let target_len = ((source_len as f64) / ratio).ceil() as usize;
 
-    // 预分配缓冲区，批量写入提高性能
-    let mut buffer = Vec::with_capacity(8192); // 16KB 缓冲区 (8192 * 2 bytes)
+    // 预分配内存，避免动态扩容
+    let mut resampled = Vec::with_capacity(target_len);
 
-    for &sample in samples {
-        // 高效的 f32 到 i16 转换
-        let clamped = sample.clamp(-1.0, 1.0);
-        let pcm_sample = (clamped * 32767.0) as i16;
+    // 如果是整数倍下采样，使用更简单的算法
+    if ratio.fract() == 0.0 && ratio >= 1.0 {
+        let step = ratio as usize;
+        data.iter().step_by(step).for_each(|&x| resampled.push(x));
+        return resampled;
+    }
 
-        buffer.extend_from_slice(&pcm_sample.to_le_bytes());
+    for i in 0..target_len {
+        // 计算目标点在原始数据中的对应位置（浮点数）
+        let source_index_float =
+            (i as f64) * (source_sample_rate as f64) / (target_sample_rate as f64);
 
-        // 当缓冲区满时批量写入
-        if buffer.len() >= buffer.capacity() - 2 {
-            writer.write_all(&buffer)?;
-            buffer.clear();
+        // 获取左右两个最近的原始数据索引
+        let left_index = source_index_float.floor() as usize;
+        let right_index = source_index_float.ceil() as usize;
+
+        // 如果左索引超出了原始数据范围，直接使用最后一个点的值 (这种情况通常发生在最后一个点或接近最后一个点时)
+        if left_index >= source_len - 1 {
+            resampled[i] = data[source_len - 1];
+            continue;
         }
+
+        // 获取左右两个点的值
+        let left_value = data[left_index];
+        let right_value = data[right_index];
+
+        // 计算插值系数
+        let alpha = (source_index_float - (left_index as f64)) as f32;
+
+        // 线性插值
+        let interpolated_value = left_value * (1.0 - alpha) + right_value * alpha;
+        resampled[i] = interpolated_value;
     }
 
-    // 写入剩余数据
-    if !buffer.is_empty() {
-        writer.write_all(&buffer)?;
-    }
-
-    writer.flush()?;
-
-    println!("PCM 文件已保存: {}", filename);
-    println!("文件信息:");
-    println!("  采样率: {} Hz", sample_rate);
-    println!("  样本数: {}", samples.len());
-    println!(
-        "  时长: {:.2} 秒",
-        samples.len() as f32 / sample_rate as f32
-    );
-    println!("  文件大小: {} 字节", samples.len() * 2); // 每个 i16 占 2 字节
-
-    Ok(())
-}
-
-/// 创建带有 WAV 头的 PCM 文件
-///
-/// # 参数
-/// - `samples`: f32 格式的音频数据
-/// - `filename`: 输出文件名
-/// - `sample_rate`: 采样率
-/// - `channels`: 声道数（通常为 1 单声道或 2 立体声）
-#[allow(dead_code)]
-pub fn to_wav(
-    samples: &[f32],
-    filename: &str,
-    sample_rate: u32,
-    channels: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let file = File::create(filename)?;
-    let mut writer = BufWriter::with_capacity(64 * 1024, file);
-
-    let bits_per_sample = 16u16;
-    let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
-    let block_align = channels * bits_per_sample / 8;
-    let data_size = samples.len() as u32 * bits_per_sample as u32 / 8;
-    let file_size = 36 + data_size;
-
-    // WAV 文件头
-    writer.write_all(b"RIFF")?; // ChunkID
-    writer.write_all(&file_size.to_le_bytes())?; // ChunkSize
-    writer.write_all(b"WAVE")?; // Format
-    writer.write_all(b"fmt ")?; // Subchunk1ID
-    writer.write_all(&16u32.to_le_bytes())?; // Subchunk1Size (PCM = 16)
-    writer.write_all(&1u16.to_le_bytes())?; // AudioFormat (PCM = 1)
-    writer.write_all(&channels.to_le_bytes())?; // NumChannels
-    writer.write_all(&sample_rate.to_le_bytes())?; // SampleRate
-    writer.write_all(&byte_rate.to_le_bytes())?; // ByteRate
-    writer.write_all(&block_align.to_le_bytes())?; // BlockAlign
-    writer.write_all(&bits_per_sample.to_le_bytes())?; // BitsPerSample
-    writer.write_all(b"data")?; // Subchunk2ID
-    writer.write_all(&data_size.to_le_bytes())?; // Subchunk2Size
-
-    // 预分配缓冲区，批量写入音频数据
-    let mut buffer = Vec::with_capacity(8192);
-
-    for &sample in samples {
-        let clamped = sample.clamp(-1.0, 1.0);
-        let pcm_sample = (clamped * 32767.0) as i16;
-        buffer.extend_from_slice(&pcm_sample.to_le_bytes());
-        if buffer.len() >= buffer.capacity() - 2 {
-            writer.write_all(&buffer)?;
-            buffer.clear();
-        }
-    }
-
-    if !buffer.is_empty() {
-        writer.write_all(&buffer)?;
-    }
-
-    writer.flush()?;
-
-    println!("WAV 文件已保存: {}", filename);
-    println!("文件信息:");
-    println!("  采样率: {} Hz", sample_rate);
-    println!("  声道数: {}", channels);
-    println!("  位深: {} bits", bits_per_sample);
-    println!("  样本数: {}", samples.len());
-    println!(
-        "  时长: {:.2} 秒",
-        samples.len() as f32 / sample_rate as f32
-    );
-    println!("  文件大小: {} 字节", file_size + 8);
-
-    Ok(())
+    resampled
 }

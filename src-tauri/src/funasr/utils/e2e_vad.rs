@@ -38,10 +38,6 @@ pub enum AudioChangeState {
     /// 静音到语音：从静音转为语音（语音起点）
     KChangeStateSil2Speech = 3,
 
-    /// 无开始状态：用于初始化
-    #[allow(dead_code)]
-    KChangeStateNoBegin = 4,
-
     /// 无效状态：异常情况
     KChangeStateInvalid = 5,
 }
@@ -143,7 +139,6 @@ pub enum PointType {
 #[derive(Debug, Clone)]
 pub struct Segment {
     pub segment_type: PointType,
-    pub frame_index: usize,
 }
 pub struct E2EVadModel {
     /// 滑动窗口检测器，用于平滑检测结果
@@ -167,10 +162,6 @@ impl Default for E2EVadModel {
 }
 
 impl E2EVadModel {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     pub fn reset(&mut self) {
         self.windows_detector.reset();
     }
@@ -190,7 +181,7 @@ impl E2EVadModel {
             // 获取当前帧的语音状态
             let frame_state = self.get_frame_state(score, decibel);
             // 检测单帧的状态变化并更新VAD状态机
-            if let Some(segment) = self.detect_one_frame(frame_state, i) {
+            if let Some(segment) = self.detect_one_frame(frame_state) {
                 segments.push(segment);
             }
         }
@@ -235,8 +226,7 @@ impl E2EVadModel {
     /// 检测单帧音频的状态变化
     /// # 参数
     /// * `frame_state`: 当前帧的语音状态
-    /// * `index`: 当前帧的全局索引
-    fn detect_one_frame(&mut self, frame_state: FrameState, index: usize) -> Option<Segment> {
+    fn detect_one_frame(&mut self, frame_state: FrameState) -> Option<Segment> {
         // 使用窗口检测器
         let state_change = self.windows_detector.detect_one_frame(frame_state);
 
@@ -250,7 +240,6 @@ impl E2EVadModel {
                 // 语音到静音，结束当前语音段
                 state = Some(Segment {
                     segment_type: PointType::End,
-                    frame_index: index,
                 });
             }
             AudioChangeState::KChangeStateSil2Sil => {
@@ -260,10 +249,9 @@ impl E2EVadModel {
                 // 静音到语音，开始新的语音段
                 state = Some(Segment {
                     segment_type: PointType::Start,
-                    frame_index: index,
                 });
             }
-            AudioChangeState::KChangeStateNoBegin | AudioChangeState::KChangeStateInvalid => {
+            AudioChangeState::KChangeStateInvalid => {
                 // 无效状态变化或未开始，无需处理
             }
         }

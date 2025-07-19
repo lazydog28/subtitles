@@ -8,7 +8,7 @@
 >
 > 在有能力的情况下，可以使用 [FUNASR]("https://github.com/modelscope/FunASR") 自行二次开发。
 > 
-> 
+> 有其他功能需求请发 issues
 
 ![60f7287930f06b9923e33fde7931f3b6.png](https://imagesbed28.caiyun.fun/60f7287930f06b9923e33fde7931f3b6.png)
 
